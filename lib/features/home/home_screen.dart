@@ -132,7 +132,7 @@ class HomeScreen extends StatelessWidget {
 
               // Features Section
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
+                padding: const EdgeInsets.symmetric(horizontal: 15),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -300,7 +300,7 @@ class HomeScreen extends StatelessWidget {
     required String description,
   }) {
     return Container(
-      width: 120,
+      width: 100,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,

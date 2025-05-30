@@ -58,5 +58,6 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
 }
 
 extension on MobileScannerController {
+  // ignore: strict_top_level_inference
   get torchState => null;
 }

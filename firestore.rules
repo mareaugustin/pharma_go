@@ -1,0 +1,38 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Fonction pour vérifier si l'utilisateur est connecté
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Fonction pour vérifier si l'utilisateur accède à ses propres données
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Fonction pour vérifier si l'utilisateur est un pharmacien
+    function isPharmacist() {
+      return isAuthenticated() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'pharmacist';
+    }
+
+    // Règles pour la collection users
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update, delete: if isOwner(userId);
+    }
+
+    // Règles pour les recherches récentes
+    match /users/{userId}/recent_searches/{searchId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Règles pour les recherches tendances
+    match /trending_searches/{query} {
+      allow read: if true; // Lecture publique
+      allow write: if isAuthenticated(); // Seuls les utilisateurs connectés peuvent mettre à jour
+    }
+  }
+}

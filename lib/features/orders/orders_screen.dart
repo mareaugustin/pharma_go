@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_vector_icons/flutter_vector_icons.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import 'package:pharma_go/core/components/headers/orders_header.dart';
 import 'package:pharma_go/app/tabs_screen.dart';
+import 'package:pharma_go/core/models/order.dart';
 
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
@@ -12,39 +15,89 @@ class OrdersScreen extends StatefulWidget {
 }
 
 class _OrdersScreenState extends State<OrdersScreen> {
-  List<Order> orders = []; // Utilisez votre classe Order existante
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  List<OrderModel> _orders = [];
+  bool _isLoading = true;
+  String? _errorMessage;
 
-  
   @override
   void initState() {
     super.initState();
-    // Charger les commandes existantes (à remplacer par votre logique de base de données)
     _loadOrders();
   }
 
-  void _loadOrders() {
-    // Simule le chargement de commandes
-    setState(() {
-      orders = [
-        Order(
-          id: '1',
-          status: 'processing',
-          date: '26 Mai 2025',
-          pharmacy: 'Pharmacie Centrale',
-          pharmacyImage: 'https://images.pexels.com/photos/3683082/pexels-photo-3683082.jpeg',
-          items: [
-            OrderItem(
-              id: '1',
-              name: 'Paracétamol 500mg',
-              quantity: 2,
-              price: 1500,
-            ),
-          ],
-          total: 3000,
-          pickupTime: '27 Mai, 14:00 - 18:00',
-        ),
-      ];
-    });
+  Future<void> _loadOrders() async {
+    try {
+      final userId = _auth.currentUser?.uid;
+      if (userId == null) return;
+
+      final snapshot = await _firestore
+          .collection('orders')
+          .where('userId', isEqualTo: userId)
+          .orderBy('date', descending: true)
+          .get();
+
+      setState(() {
+        _orders = snapshot.docs.map((doc) => OrderModel.fromFirestore(doc)).toList();
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Erreur de chargement des commandes';
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _addNewOrder(Map<String, dynamic> orderData) async {
+    try {
+      final userId = _auth.currentUser?.uid;
+      if (userId == null) return;
+
+      final newOrder = OrderModel(
+        id: _firestore.collection('orders').doc().id,
+        userId: userId,
+        status: 'processing',
+        date: DateTime.now(),
+        pharmacyId: orderData['pharmacyId'] ?? 'pharmacy_unknown',
+        pharmacyName: orderData['pharmacyName'] ?? 'Pharmacie Inconnue',
+        pharmacyImage: orderData['pharmacyImage'] ?? 'https://via.placeholder.com/150',
+        items: [
+          OrderItem(
+            id: orderData['medicationId'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
+            medicationId: orderData['medicationId'] ?? '',
+            name: orderData['medicationName'] ?? 'Médicament Inconnu',
+            quantity: int.tryParse(orderData['quantity'].toString()) ?? 1,
+            price: int.tryParse(orderData['price'].toString()) ?? 0,
+            imageUrl: orderData['medicationImage'] ?? 'https://via.placeholder.com/150',
+          ),
+        ],
+        total: (int.tryParse(orderData['price'].toString()) ?? 0) * 
+               (int.tryParse(orderData['quantity'].toString()) ?? 1),
+        pickupTime: orderData['deliveryType'] == 'pickup' 
+            ? DateTime.now().add(const Duration(days: 1))
+            : null,
+        deliveryTime: orderData['deliveryType'] == 'delivery'
+            ? DateTime.now().add(const Duration(days: 1))
+            : null,
+        deliveryAddress: orderData['deliveryAddress'] as String?,
+      );
+
+      await _firestore.collection('orders').doc(newOrder.id).set(newOrder.toMap());
+      
+      setState(() {
+        _orders.insert(0, newOrder);
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Commande passée avec succès!')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erreur: ${e.toString()}')),
+      );
+    }
   }
 
   @override
@@ -56,88 +109,31 @@ class _OrdersScreenState extends State<OrdersScreen> {
     }
   }
 
-  void _addNewOrder(Map<String, dynamic> orderData) {
-    final newOrder = Order(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      status: 'processing', // Nouvelle commande = en préparation
-      date: '${DateTime.now().day} ${_getMonthName(DateTime.now().month)} ${DateTime.now().year}',
-      pharmacy: orderData['pharmacy'],
-      pharmacyImage: _getPharmacyImage(orderData['pharmacy']),
-      items: [
-        OrderItem(
-          id: '1',
-          name: orderData['medication'],
-          quantity: int.parse(orderData['quantity']),
-          price: _calculatePrice(orderData['medication'], int.parse(orderData['quantity'])),
-        ),
-      ],
-      total: _calculatePrice(orderData['medication'], int.parse(orderData['quantity'])),
-      pickupTime: orderData['delivery'] == 'Retrait en pharmacie' 
-          ? '${DateTime.now().day + 1} ${_getMonthName(DateTime.now().month)}, 14:00 - 18:00'
-          : null,
-      deliveryTime: orderData['delivery'] == 'Livraison à domicile'
-          ? '${DateTime.now().day + 1} ${_getMonthName(DateTime.now().month)}, 16:30 - 18:00'
-          : null,
-    );
-
-    setState(() {
-      orders.insert(0, newOrder); // Ajoute en tête de liste
-    });
-  }
-
-  // Helper methods
-  String _getMonthName(int month) {
-    const months = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
-    return months[month - 1];
-  }
-
-  String _getPharmacyImage(String pharmacy) {
-    // Simulez des images différentes selon la pharmacie
-    const images = [
-      'https://images.pexels.com/photos/3683082/pexels-photo-3683082.jpeg',
-      'https://images.pexels.com/photos/8942581/pexels-photo-8942581.jpeg',
-      'https://images.pexels.com/photos/5699514/pexels-photo-5699514.jpeg',
-    ];
-    return images[pharmacy.length % images.length];
-  }
-
-  int _calculatePrice(String medication, int quantity) {
-    // Simulez un prix selon le médicament
-    final basePrices = {
-      'Paracétamol': 750,
-      'Doliprane': 800,
-      'Ibuprofène': 1200,
-      'Amoxicilline': 2000,
-      'Vitamine': 1500,
-    };
-    
-    final basePrice = basePrices.entries
-        .firstWhere((e) => medication.contains(e.key), orElse: () => MapEntry('', 1000))
-        .value;
-    
-    return basePrice * quantity;
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       body: SafeArea(
-        top: true,
         child: Column(
           children: [
-            OrdersHeader(), // Ton composant OrdersHeader converti
-            
+            const OrdersHeader(),
             Expanded(
-              child: orders.isNotEmpty
-                  ? ListView.builder(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: orders.length,
-                      itemBuilder: (context, index) {
-                        return OrderCard(order: orders[index]);
-                      },
-                    )
-                  : const EmptyOrdersState(),
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _errorMessage != null
+                      ? Center(child: Text(_errorMessage!))
+                      : _orders.isEmpty
+                          ? const EmptyOrdersState()
+                          : RefreshIndicator(
+                              onRefresh: _loadOrders,
+                              child: ListView.builder(
+                                padding: const EdgeInsets.all(16),
+                                itemCount: _orders.length,
+                                itemBuilder: (context, index) {
+                                  return OrderCard(order: _orders[index]);
+                                },
+                              ),
+                            ),
             ),
           ],
         ),
@@ -147,31 +143,27 @@ class _OrdersScreenState extends State<OrdersScreen> {
 }
 
 class OrderCard extends StatelessWidget {
-  final Order order;
+  final OrderModel order;
 
   const OrderCard({super.key, required this.order});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final dateFormat = DateFormat('dd MMM yyyy');
+    final timeFormat = DateFormat('HH:mm');
+
+    return Card(
       margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black12,
-            offset: Offset(0, 2),
-            blurRadius: 3,
-            spreadRadius: 0,
-          ),
-        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // En-tête
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+            padding: const EdgeInsets.all(16),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -179,16 +171,16 @@ class OrderCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      order.date,
+                      dateFormat.format(order.date),
                       style: GoogleFonts.poppins(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
                         color: const Color(0xFF64748B),
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 4),
                     Text(
-                      'Commande N°${order.id}',
+                      'Commande #${order.id.substring(0, 8)}',
                       style: GoogleFonts.poppins(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
@@ -202,8 +194,9 @@ class OrderCard extends StatelessWidget {
             ),
           ),
           
+          // Info pharmacie
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               children: [
                 ClipRRect(
@@ -213,6 +206,12 @@ class OrderCard extends StatelessWidget {
                     width: 40,
                     height: 40,
                     fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      width: 40,
+                      height: 40,
+                      color: Colors.grey[200],
+                      child: const Icon(Icons.local_pharmacy),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -220,7 +219,7 @@ class OrderCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      order.pharmacy,
+                      order.pharmacyName,
                       style: GoogleFonts.poppins(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
@@ -232,7 +231,6 @@ class OrderCard extends StatelessWidget {
                       '${order.items.length} article${order.items.length > 1 ? 's' : ''}',
                       style: GoogleFonts.poppins(
                         fontSize: 13,
-                        fontWeight: FontWeight.normal,
                         color: const Color(0xFF64748B),
                       ),
                     ),
@@ -242,18 +240,20 @@ class OrderCard extends StatelessWidget {
             ),
           ),
           
-          const Divider(height: 1, color: Color(0xFFF1F5F9)),
+          const Divider(height: 24, thickness: 1, indent: 16, endIndent: 16),
           
+          // Liste des articles
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Column(
               children: order.items.map((item) => _buildOrderItem(item)).toList(),
             ),
           ),
           
-          if (order.status == 'in-transit' || order.status == 'processing')
+          // Info livraison/retrait
+          if (order.deliveryTime != null || order.pickupTime != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               child: Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -263,19 +263,19 @@ class OrderCard extends StatelessWidget {
                 child: Row(
                   children: [
                     Icon(
-                      order.status == 'in-transit'
-                          ? MaterialIcons.local_shipping
-                          : MaterialIcons.access_time,
+                      order.deliveryTime != null
+                          ? Icons.delivery_dining
+                          : Icons.access_time,
                       size: 16,
-                      color: order.status == 'in-transit'
+                      color: order.deliveryTime != null
                           ? const Color(0xFFF59E0B)
                           : const Color(0xFF3B82F6),
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      order.status == 'in-transit'
-                          ? 'Livraison prévue: ${order.deliveryTime}'
-                          : 'Retrait prévu: ${order.pickupTime}',
+                      order.deliveryTime != null
+                          ? 'Livraison prévue: ${timeFormat.format(order.deliveryTime!)}'
+                          : 'Retrait prévu: ${dateFormat.format(order.pickupTime!)} ${timeFormat.format(order.pickupTime!)}',
                       style: GoogleFonts.poppins(
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
@@ -287,10 +287,10 @@ class OrderCard extends StatelessWidget {
               ),
             ),
           
-          const Divider(height: 1, color: Color(0xFFF1F5F9)),
-          
+          // Total
+          const Divider(height: 1, thickness: 1, indent: 16, endIndent: 16),
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+            padding: const EdgeInsets.all(16),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -303,7 +303,7 @@ class OrderCard extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${order.total} FCFA',
+                  '${NumberFormat('#,##0').format(order.total)} FCFA',
                   style: GoogleFonts.poppins(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -314,38 +314,27 @@ class OrderCard extends StatelessWidget {
             ),
           ),
           
-          const Divider(height: 1, color: Color(0xFFF1F5F9)),
-          
+          // Bouton Détails
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: () {
-                    // Action détails
-                  },
-                  style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF10B981),
-                  ),
-                  child: Row(
-                    children: [
-                      Text(
-                        'Détails',
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      const Icon(
-                        MaterialIcons.chevron_right,
-                        size: 16,
-                      ),
-                    ],
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () {
+                  // Navigation vers les détails
+                },
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFF10B981),
+                ),
+                icon: const Icon(Icons.chevron_right, size: 20),
+                label: Text(
+                  'Détails',
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
-              ],
+              ),
             ),
           ),
         ],
@@ -355,40 +344,55 @@ class OrderCard extends StatelessWidget {
 
   Widget _buildOrderItem(OrderItem item) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: 12),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Expanded(
-            child: Text(
-              item.name,
-              style: GoogleFonts.poppins(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: const Color(0xFF1E293B),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.network(
+              item.imageUrl,
+              width: 50,
+              height: 50,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(
+                width: 50,
+                height: 50,
+                color: Colors.grey[200],
+                child: const Icon(Icons.medication),
               ),
             ),
           ),
-          Row(
-            children: [
-              Text(
-                'x${item.quantity}',
-                style: GoogleFonts.poppins(
-                  fontSize: 13,
-                  fontWeight: FontWeight.normal,
-                  color: const Color(0xFF64748B),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.name,
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: const Color(0xFF1E293B),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                '${item.price} FCFA',
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  color: const Color(0xFF1E293B),
+                const SizedBox(height: 4),
+                Text(
+                  '${NumberFormat('#,##0').format(item.price)} FCFA x ${item.quantity}',
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    color: const Color(0xFF64748B),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
+          ),
+          Text(
+            '${NumberFormat('#,##0').format(item.subtotal)} FCFA',
+            style: GoogleFonts.poppins(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: const Color(0xFF1E293B),
+            ),
           ),
         ],
       ),
@@ -403,41 +407,18 @@ class OrderStatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Color backgroundColor;
-    Color textColor;
-    IconData icon;
-    String label;
-
-    switch (status) {
-      case 'delivered':
-        backgroundColor = const Color(0xFFDCFCE7);
-        textColor = const Color(0xFF10B981);
-        icon = MaterialIcons.check_circle;
-        label = 'Livré';
-        break;
-      case 'in-transit':
-        backgroundColor = const Color(0xFFFEF3C7);
-        textColor = const Color(0xFFF59E0B);
-        icon = MaterialIcons.local_shipping;
-        label = 'En livraison';
-        break;
-      case 'processing':
-        backgroundColor = const Color(0xFFE0F2FE);
-        textColor = const Color(0xFF3B82F6);
-        icon = MaterialIcons.access_time;
-        label = 'En préparation';
-        break;
-      default:
-        backgroundColor = const Color(0xFFF1F5F9);
-        textColor = const Color(0xFF64748B);
-        icon = MaterialIcons.access_time;
-        label = 'En attente';
-    }
+    final (Color bgColor, Color textColor, IconData icon, String label) = switch (status) {
+      'delivered' => (const Color(0xFFDCFCE7), const Color(0xFF10B981), Icons.check_circle, 'Livré'),
+      'ready' => (const Color(0xFFFEF3C7), const Color(0xFFF59E0B), Icons.local_shipping, 'Prête'),
+      'processing' => (const Color(0xFFE0F2FE), const Color(0xFF3B82F6), Icons.access_time, 'En cours'),
+      'cancelled' => (const Color(0xFFFEE2E2), const Color(0xFFEF4444), Icons.cancel, 'Annulée'),
+      _ => (const Color(0xFFF1F5F9), const Color(0xFF64748B), Icons.access_time, 'En attente'),
+    };
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
       decoration: BoxDecoration(
-        color: backgroundColor,
+        color: bgColor,
         borderRadius: BorderRadius.circular(100),
       ),
       child: Row(
@@ -471,7 +452,7 @@ class EmptyOrdersState extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Icon(
-              MaterialIcons.inventory,
+              Icons.inventory,
               size: 60,
               color: Color(0xFFCBD5E1),
             ),
@@ -490,19 +471,14 @@ class EmptyOrdersState extends StatelessWidget {
               textAlign: TextAlign.center,
               style: GoogleFonts.poppins(
                 fontSize: 15,
-                fontWeight: FontWeight.normal,
                 color: const Color(0xFF64748B),
               ),
             ),
             const SizedBox(height: 24),
             ElevatedButton(
               onPressed: () {
-                // Action recherche
-                final tabsScreenState = context.findAncestorStateOfType<TabsScreenState>();
-                  // ignore: invalid_use_of_protected_member
-                  tabsScreenState?.setState(() {
-                    tabsScreenState.currentIndex = 1; // Index du recherche
-                  });
+                final tabsState = context.findAncestorStateOfType<TabsScreenState>();
+                tabsState?.setState(() => tabsState.currentIndex = 1);
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF10B981),
@@ -526,83 +502,3 @@ class EmptyOrdersState extends StatelessWidget {
     );
   }
 }
-
-// Modèles de données
-class Order {
-  final String id;
-  final String status;
-  final String date;
-  final String pharmacy;
-  final String pharmacyImage;
-  final List<OrderItem> items;
-  final int total;
-  final String? deliveryTime;
-  final String? pickupTime;
-
-  Order({
-    required this.id,
-    required this.status,
-    required this.date,
-    required this.pharmacy,
-    required this.pharmacyImage,
-    required this.items,
-    required this.total,
-    this.deliveryTime,
-    this.pickupTime,
-  });
-}
-
-class OrderItem {
-  final String id;
-  final String name;
-  final int quantity;
-  final int price;
-
-  OrderItem({
-    required this.id,
-    required this.name,
-    required this.quantity,
-    required this.price,
-  });
-}
-
-// Données fictives
-final List<Order> orders = [
-  // Order(
-  //   id: '1',
-  //   status: 'delivered',
-  //   date: '15 Mai 2025',
-  //   pharmacy: 'Pharmacie Centrale',
-  //   pharmacyImage: 'https://images.pexels.com/photos/3683082/pexels-photo-3683082.jpeg',
-  //   items: [
-  //     OrderItem(id: '1', name: 'Paracétamol 500mg', quantity: 2, price: 1500),
-  //     OrderItem(id: '2', name: 'Ibuprofène 400mg', quantity: 1, price: 2200),
-  //   ],
-  //   total: 5200,
-  // ),
-  // Order(
-  //   id: '2',
-  //   status: 'in-transit',
-  //   date: '14 Mai 2025',
-  //   pharmacy: 'Pharmacie du Soleil',
-  //   pharmacyImage: 'https://images.pexels.com/photos/8942581/pexels-photo-8942581.jpeg',
-  //   items: [
-  //     OrderItem(id: '3', name: 'Amoxicilline 500mg', quantity: 1, price: 4500),
-  //   ],
-  //   total: 4500,
-  //   deliveryTime: '16:30 - 17:00',
-  // ),
-  // Order(
-  //   id: '3',
-  //   status: 'processing',
-  //   date: '14 Mai 2025',
-  //   pharmacy: 'Pharmacie Saint-Jean',
-  //   pharmacyImage: 'https://images.pexels.com/photos/5699514/pexels-photo-5699514.jpeg',
-  //   items: [
-  //     OrderItem(id: '4', name: 'Doliprane 1000mg', quantity: 2, price: 1800),
-  //     OrderItem(id: '5', name: 'Vitamines C', quantity: 1, price: 3000),
-  //   ],
-  //   total: 6600,
-  //   pickupTime: '15 Mai, 14:00 - 18:00',
-  // ),
-];

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:pharma_go/features/orders/order_form_screen.dart';
-import 'package:pharma_go/app/tabs_screen.dart';
+// import 'package:pharma_go/features/orders/order_form_screen.dart';
+// import 'package:pharma_go/app/tabs_screen.dart';
 
 class MedicationItem extends StatelessWidget {
   final Map<String, dynamic> medication;
@@ -150,26 +150,25 @@ class MedicationItem extends StatelessWidget {
             child: Text('Annuler', style: GoogleFonts.poppins()),
           ),
           ElevatedButton(
-            onPressed: () async {
-            Navigator.pop(context); // Ferme la boîte de dialogue
-            final result = await Navigator.push(
+            onPressed: () {
+            Navigator.pushNamed(
               context,
-              MaterialPageRoute(
-                builder: (context) => OrderFormScreen(medication: medication),
-              ),
+              '/orders',
+              arguments: {
+                'pharmacyId': 'pharmacy_123',
+                'pharmacyName': 'Ma Pharmacie',
+                'pharmacyImage': 'https://...',
+                'medicationId': 'med_456',
+                'medicationName': 'Paracétamol',
+                'medicationImage': 'https://...',
+                'quantity': 2,
+                'price': 1500,
+                'deliveryType': 'pickup', // ou 'delivery'
+                'deliveryAddress': '123 Rue...', // si delivery
+              },
             );
-            
-            if (result != null && result is Map<String, dynamic>) {
-              // Trouver le TabsScreenState pour changer d'onglet
-              // ignore: use_build_context_synchronously
-              final tabsScreenState = context.findAncestorStateOfType<TabsScreenState>();
-              // ignore: invalid_use_of_protected_member
-                tabsScreenState?.setState(() {
-                  tabsScreenState.currentIndex = 3; // Index de la commande
-                });
-            }
           },
-          child: Text('Oui'),
+          child: Text('Confirmer la commande'),
         ),
       ],
     ),
